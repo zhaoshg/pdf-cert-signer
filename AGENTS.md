@@ -35,6 +35,13 @@
 - cert_audit_log 表增加字段：auth_ticket、request_ip、signed_file_path（输出文件保存路径）
 - 签章完成后将上述信息写入审计日志，便于后续追溯
 
+### 6. 证据上链
+- 签章完成后，将已签章文件和场景信息打包，上区块链存证
+- 场景信息包括：证书指纹、签章时间、TSA 时间戳令牌、审计字段（authTicket、requestIp）等
+- 使用开放联盟链，候选：BSN（区块链服务网络）或百度超级链（XuperChain）
+- 上链后返回交易哈希（txHash），写入 cert_audit_log 或独立的链上存证记录表
+- 提供链上存证验证接口：传入 txHash，返回存证数据及链上确认状态
+
 ## 关键文件索引
 
 - `cert-server-infra/.../PdfSigner.java` — 核心签章逻辑（视觉签章、数字签名、TSA 时间戳）
