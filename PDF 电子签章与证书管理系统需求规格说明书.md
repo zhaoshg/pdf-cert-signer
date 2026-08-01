@@ -104,11 +104,21 @@
 
 **处理逻辑：**
 
-1. 校验 `credit_code` 格式，生成公私钥对。
-2. 后端使用内部根证书（Root CA）签发 X.509 证书，CN 格式如 `张三(财务部)`。
+1. 校验 `credit_code` 格式，系统自动生成 `signer_id`（证书唯一标识，如 `CERT_20260731_001`），同时生成公私钥对。
+2. 后端使用内部根证书（Root CA）签发 X.509 证书，CN 格式如 `张三(财务部)`，并将 `signer_id` 写入证书扩展字段。
 3. 生成 PKCS#12 格式（`.p12`）密钥库，AES-256 加密存储。
-4. **自动作废：** 若该 `signer_id` 已有 ACTIVE 证书，先将其状态置为 REVOKED，再存储新证书。
+4. **自动作废：** 若该 `credit_code` 已有 ACTIVE 证书，先将其状态置为 REVOKED，再存储新证书。
 5. 数据库记录： `signer_id`,`credit_code`, `name`, `department`, `serial_number`, `valid_from`, `valid_to`, `cert_status` (ACTIVE / REVOKED)。
+
+**响应参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `signer_id` | 系统生成的证书唯一标识，调用方需保管用于后续签章 |
+| `serial_number` | X.509 证书序列号 |
+| `valid_from` | 有效期起始时间 |
+| `valid_to` | 有效期截止时间 |
+| `cert_subject` | 证书主题 (CN) |
 
 #### 1.2 证书查看
 
@@ -165,7 +175,7 @@
 
 ```json
 {
-  "signerId": "USCI_1234567890",
+  "signerId": "CERT_20260731_A3F8",
   "pdfUrl": "https://obs.example.com/path/to/document.pdf",
   "signatures": [
     {
@@ -259,11 +269,27 @@
 }
 ```
 
+### `/api/v1/cert/issue` 响应示例
+
+```json
+{
+  "code": 0,
+  "message": "签发成功",
+  "data": {
+    "signerId": "CERT_20260731_A3F8",
+    "serialNumber": "01:23:45:67:89:AB:CD:EF",
+    "validFrom": "2026-07-31T00:00:00+08:00",
+    "validTo": "2027-07-31T00:00:00+08:00",
+    "certSubject": "CN=张三(财务部),OU=1234567890"
+  }
+}
+```
+
 ### `/api/v1/pdf/sign` 请求示例
 
 ```json
 {
-  "signerId": "USCI_1234567890",
+  "signerId": "CERT_20260731_A3F8",
   "pdfUrl": "https://obs.example.com/path/contract.pdf",
   "signatures": [
     {

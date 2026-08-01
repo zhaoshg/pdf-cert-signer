@@ -1,1 +1,7 @@
-.firecrawl/
+node_modules/
+target/
+dist/
+*.log
+*.tmp
+*.swp
+.DS_Store

@@ -1,0 +1,53 @@
+spring:
+  application:
+    name: cert-server
+  profiles:
+    active: dev
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: jdbc:mysql://localhost:3306/cert_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
+    username: root
+    password: ${DB_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    open-in-view: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: ${REDIS_PASSWORD:}
+
+server:
+  port: 8080
+
+storage:
+  type: local
+  local:
+    base-path: .cert-storage
+
+cert:
+  root-ca:
+    keystore-path: conf/root-ca.p12
+    keystore-password: ${ROOT_CA_PASSWORD:root-ca-secret}
+  key-secret: ${CERT_KEY_SECRET:cert-secret-key-32bytes!!}
+  default-valid-days: 365
+  tsa:
+    url: https://freetsa.org/tsr
+    timeout-seconds: 10
+    fail-on-error: false
+
+jwt:
+  secret: ${JWT_SECRET:jwt-secret-key-at-least-256-bits-long-for-hs256}
+  expiration-hours: 2
+
+logging:
+  level:
+    com.example.cert: DEBUG
