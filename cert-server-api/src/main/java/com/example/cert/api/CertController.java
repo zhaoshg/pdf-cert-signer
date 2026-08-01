@@ -29,9 +29,14 @@ public class CertController {
     @PostMapping("/issue")
     public R<IssueResponse> issue(@Valid @RequestBody IssueRequest request) {
         IssueResponse resp = certService.issue(
-                request.getCreditCode(), request.getName(), request.getDepartment(),
-                request.getEmail(), request.getValidDays());
+                request.getCertType(), request.getCreditCode(), request.getName(),
+                request.getDepartment(), request.getEmail(), request.getValidDays());
         return R.ok("签发成功", resp);
+    }
+
+    @GetMapping("/info/{signerId}")
+    public R<CertVO> getBySignerId(@PathVariable String signerId) {
+        return R.ok(certService.lookupBySignerId(signerId));
     }
 
     @GetMapping("/list")

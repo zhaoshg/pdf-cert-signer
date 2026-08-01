@@ -21,13 +21,16 @@ public class Certificate {
     @Column(name = "signer_id", nullable = false, unique = true, length = 32)
     private String signerId;
 
+    @Column(name = "cert_type", nullable = false)
+    private Integer certType;
+
     @Column(name = "credit_code", nullable = false, length = 64)
     private String creditCode;
 
     @Column(nullable = false, length = 64)
     private String name;
 
-    @Column(nullable = false, length = 128)
+    @Column(length = 128)
     private String department;
 
     @Column(length = 128)

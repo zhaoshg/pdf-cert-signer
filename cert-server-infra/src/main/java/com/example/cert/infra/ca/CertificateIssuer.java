@@ -41,7 +41,7 @@ public class CertificateIssuer {
     @Value("${cert.key-secret:cert-secret-key-32bytes!!}")
     private String keySecret;
 
-    public IssueResult issue(String creditCode, String name, String department, String email, int validDays)
+    public IssueResult issue(int certType, String creditCode, String name, String department, String email, int validDays)
             throws Exception {
 
         String signerId = signerIdGenerator.generate();
@@ -50,7 +50,7 @@ public class CertificateIssuer {
         keyPairGen.initialize(2048);
         KeyPair keyPair = keyPairGen.generateKeyPair();
 
-        String cn = name + "(" + department + ")";
+        String cn = department != null && !department.isBlank() ? name + "(" + department + ")" : name;
         String dn = "CN=" + cn + ",OU=" + creditCode + ",O=PDFSigner,C=CN";
         X500Name subject = new X500Name(dn);
 
@@ -92,8 +92,8 @@ public class CertificateIssuer {
         LocalDateTime validFrom = LocalDateTime.ofInstant(notBefore.toInstant(), ZoneId.systemDefault());
         LocalDateTime validTo = LocalDateTime.ofInstant(notAfter.toInstant(), ZoneId.systemDefault());
 
-        log.info("Certificate issued: signerId={}, subject={}, serial={}", signerId, dn, serial.toString(16));
+        log.info("Certificate issued: signerId={}, certType={}, subject={}, serial={}", signerId, certType, dn, serial.toString(16));
 
-        return new IssueResult(signerId, serial.toString(16), dn, validFrom, validTo, p12Data);
+        return new IssueResult(signerId, certType, serial.toString(16), dn, validFrom, validTo, p12Data);
     }
 }

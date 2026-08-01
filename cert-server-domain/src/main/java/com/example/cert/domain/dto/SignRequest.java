@@ -25,7 +25,6 @@ public class SignRequest {
 
         private int pageIndex;
 
-        @NotBlank(message = "印章URL不能为空")
         private String sealUrl;
 
         private float x;

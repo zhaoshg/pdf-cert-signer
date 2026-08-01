@@ -9,6 +9,7 @@ public class CertVO {
 
     private Long id;
     private String signerId;
+    private Integer certType;
     private String creditCode;
     private String name;
     private String department;

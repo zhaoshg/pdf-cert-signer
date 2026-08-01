@@ -15,6 +15,9 @@
       <a-table :columns="columns" :data-source="dataSource" :loading="loading" :pagination="pagination"
                row-key="id" @change="onTableChange">
         <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'certType'">
+            <a-tag :color="record.certType === CERT_TYPE_ENTERPRISE ? 'blue' : 'orange'">{{ record.certType === CERT_TYPE_ENTERPRISE ? '企业' : '个人' }}</a-tag>
+          </template>
           <template v-if="column.key === 'status'">
             <a-tag :color="record.status === 'ACTIVE' ? 'green' : 'red'">{{ record.status === 'ACTIVE' ? '有效' : '已吊销' }}</a-tag>
           </template>
@@ -32,13 +35,19 @@
 
     <a-modal v-model:open="issueVisible" title="签发证书" @ok="handleIssue" :confirm-loading="issueLoading">
       <a-form :model="issueForm" :label-col="{ span: 6 }">
-        <a-form-item label="统一信用代码" required>
+        <a-form-item label="证书类型" required>
+          <a-radio-group v-model:value="issueForm.certType">
+            <a-radio :value="CERT_TYPE_ENTERPRISE">企业</a-radio>
+            <a-radio :value="CERT_TYPE_INDIVIDUAL">个人</a-radio>
+          </a-radio-group>
+        </a-form-item>
+        <a-form-item :label="issueForm.certType === CERT_TYPE_INDIVIDUAL ? '身份证号' : '统一信用代码'" required>
           <a-input v-model:value="issueForm.creditCode" />
         </a-form-item>
         <a-form-item label="姓名" required>
           <a-input v-model:value="issueForm.name" />
         </a-form-item>
-        <a-form-item label="部门" required>
+        <a-form-item label="部门">
           <a-input v-model:value="issueForm.department" />
         </a-form-item>
         <a-form-item label="邮箱">
@@ -56,6 +65,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import api from '../../api'
+import { CERT_TYPE_ENTERPRISE, CERT_TYPE_INDIVIDUAL } from '../../utils/sealUtils'
 
 const loading = ref(false)
 const dataSource = ref<any[]>([])
@@ -64,9 +74,10 @@ const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
 
 const columns = [
   { title: '证书ID', dataIndex: 'signerId', key: 'signerId' },
+  { title: '证书类型', dataIndex: 'certType', key: 'certType' },
   { title: '姓名', dataIndex: 'name', key: 'name' },
   { title: '部门', dataIndex: 'department', key: 'department' },
-  { title: '统一信用代码', dataIndex: 'creditCode', key: 'creditCode' },
+  { title: '统一信用代码/身份证号', dataIndex: 'creditCode', key: 'creditCode' },
   { title: '证书主题', dataIndex: 'certSubject', key: 'certSubject' },
   { title: '有效期起', dataIndex: 'validFrom', key: 'validFrom' },
   { title: '有效期止', dataIndex: 'validTo', key: 'validTo' },
@@ -77,7 +88,7 @@ const columns = [
 const issueVisible = ref(false)
 const issueLoading = ref(false)
 const issueForm = reactive({
-  creditCode: '', name: '', department: '', email: '', validDays: 365
+  certType: CERT_TYPE_ENTERPRISE, creditCode: '', name: '', department: '', email: '', validDays: 365
 })
 
 onMounted(() => fetchList())
@@ -106,6 +117,7 @@ function onTableChange(pag: any) {
 }
 
 function showIssueModal() {
+  issueForm.certType = CERT_TYPE_ENTERPRISE
   issueForm.creditCode = ''
   issueForm.name = ''
   issueForm.department = ''
@@ -115,7 +127,7 @@ function showIssueModal() {
 }
 
 async function handleIssue() {
-  if (!issueForm.creditCode || !issueForm.name || !issueForm.department) {
+  if (!issueForm.certType || !issueForm.creditCode || !issueForm.name) {
     message.warning('请填写必填项')
     return
   }

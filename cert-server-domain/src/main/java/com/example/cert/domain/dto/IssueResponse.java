@@ -6,6 +6,7 @@ import lombok.Data;
 public class IssueResponse {
 
     private String signerId;
+    private Integer certType;
     private String serialNumber;
     private String certSubject;
     private String validFrom;

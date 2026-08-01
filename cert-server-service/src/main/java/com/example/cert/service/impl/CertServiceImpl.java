@@ -45,15 +45,15 @@ public class CertServiceImpl implements CertService {
 
     @Override
     @Transactional
-    public IssueResponse issue(String creditCode, String name, String department, String email, Integer validDays) {
+    public IssueResponse issue(int certType, String creditCode, String name, String department, String email, Integer validDays) {
+        if (certType != 1 && certType != 2) {
+            throw new BizException("证书类型无效，1=企业，2=个人");
+        }
         if (creditCode == null || creditCode.isBlank()) {
-            throw new BizException("统一信用代码不能为空");
+            throw new BizException("统一信用代码/身份证号不能为空");
         }
         if (name == null || name.isBlank()) {
             throw new BizException("姓名不能为空");
-        }
-        if (department == null || department.isBlank()) {
-            throw new BizException("部门不能为空");
         }
 
         int days = validDays != null && validDays > 0 ? validDays : defaultValidDays;
@@ -65,10 +65,11 @@ public class CertServiceImpl implements CertService {
         }
 
         try {
-            IssueResult result = issuer.issue(creditCode, name, department, email, days);
+            IssueResult result = issuer.issue(certType, creditCode, name, department, email, days);
 
             Certificate cert = new Certificate();
             cert.setSignerId(result.getSignerId());
+            cert.setCertType(certType);
             cert.setCreditCode(creditCode);
             cert.setName(name);
             cert.setDepartment(department);
@@ -84,6 +85,7 @@ public class CertServiceImpl implements CertService {
 
             IssueResponse resp = new IssueResponse();
             resp.setSignerId(result.getSignerId());
+            resp.setCertType(certType);
             resp.setSerialNumber(result.getSerialNumber());
             resp.setCertSubject(result.getCertSubject());
             DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -94,6 +96,13 @@ public class CertServiceImpl implements CertService {
         } catch (Exception e) {
             throw new BizException("证书签发失败: " + e.getMessage());
         }
+    }
+
+    @Override
+    public CertVO lookupBySignerId(String signerId) {
+        Certificate cert = certRepo.findBySignerId(signerId)
+                .orElseThrow(() -> new BizException("证书不存在"));
+        return toVO(cert);
     }
 
     @Override
@@ -161,6 +170,7 @@ public class CertServiceImpl implements CertService {
     private CertVO toVO(Certificate c) {
         CertVO vo = new CertVO();
         vo.setId(c.getId());
+        vo.setCertType(c.getCertType());
         vo.setSignerId(c.getSignerId());
         vo.setCreditCode(c.getCreditCode());
         vo.setName(c.getName());

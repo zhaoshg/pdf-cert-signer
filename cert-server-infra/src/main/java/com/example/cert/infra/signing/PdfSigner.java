@@ -96,7 +96,7 @@ public class PdfSigner {
         tempDoc.addPage(page);
 
         try (PDPageContentStream cs = new PDPageContentStream(tempDoc, page)) {
-            byte[] imageData = downloadImage(pos.sealUrl);
+            byte[] imageData = loadImage(pos.sealUrl);
             if (imageData != null) {
                 PDImageXObject img = PDImageXObject.createFromByteArray(tempDoc, imageData, "seal");
                 cs.drawImage(img, 0, 0, w, h);
@@ -109,7 +109,28 @@ public class PdfSigner {
         return new ByteArrayInputStream(baos.toByteArray());
     }
 
-    private byte[] downloadImage(String url) {
+    private byte[] loadImage(String url) {
+        if (url == null || url.isBlank()) {
+            return null;
+        }
+        if (url.startsWith("data:")) {
+            return decodeBase64DataUrl(url);
+        }
+        return downloadHttpImage(url);
+    }
+
+    private byte[] decodeBase64DataUrl(String url) {
+        try {
+            int commaIdx = url.indexOf(',');
+            if (commaIdx < 0) return null;
+            String base64 = url.substring(commaIdx + 1);
+            return java.util.Base64.getDecoder().decode(base64);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private byte[] downloadHttpImage(String url) {
         try {
             HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
             conn.setConnectTimeout(10000);

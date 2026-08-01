@@ -11,7 +11,7 @@
         <a-form-item>
           <a-space>
             <a-button type="primary" @click="loadPdf">加载PDF</a-button>
-            <a-button @click="addSeal">插入印章</a-button>
+            <a-button :loading="inserting" @click="addSeal">插入印章</a-button>
             <a-button @click="clearSeals">清除印章</a-button>
             <a-button type="primary" danger :loading="signing" @click="doSign">确认签章</a-button>
           </a-space>
@@ -33,23 +33,6 @@
           <a-slider v-model:value="scale" :min="0.5" :max="2" :step="0.1" style="width:200px;margin-left:16px;display:inline-block" @change="renderPage" />
         </div>
       </div>
-
-      <a-modal v-model:open="sealModalVisible" title="插入印章" @ok="confirmSeal">
-        <a-form>
-          <a-form-item label="印章URL" required>
-            <a-input v-model:value="sealForm.sealUrl" placeholder="印章图片URL" />
-          </a-form-item>
-          <a-form-item label="宽度">
-            <a-input-number v-model:value="sealForm.width" :min="50" :max="400" />
-          </a-form-item>
-          <a-form-item label="高度">
-            <a-input-number v-model:value="sealForm.height" :min="50" :max="400" />
-          </a-form-item>
-          <a-form-item label="签章原因">
-            <a-input v-model:value="sealForm.reason" />
-          </a-form-item>
-        </a-form>
-      </a-modal>
     </a-card>
   </div>
 </template>
@@ -59,6 +42,7 @@ import { ref, reactive } from 'vue'
 import { message } from 'ant-design-vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import api from '../../api'
+import { generateSealImage } from '../../utils/sealUtils'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
 
@@ -69,10 +53,9 @@ const pageNum = ref(1)
 const totalPages = ref(0)
 const scale = ref(1)
 const signing = ref(false)
+const inserting = ref(false)
 const seals = ref<any[]>([])
 
-const sealModalVisible = ref(false)
-const sealForm = reactive({ sealUrl: '', width: 120, height: 120, reason: '' })
 let pdfDoc: any = null
 
 async function loadPdf() {
@@ -103,26 +86,28 @@ async function renderPage() {
 function prevPage() { if (pageNum.value > 1) { pageNum.value--; renderPage() } }
 function nextPage() { if (pageNum.value < totalPages.value) { pageNum.value++; renderPage() } }
 
-function addSeal() {
-  sealForm.sealUrl = ''
-  sealForm.width = 120
-  sealForm.height = 120
-  sealForm.reason = ''
-  sealModalVisible.value = true
-}
-
-function confirmSeal() {
-  if (!sealForm.sealUrl) { message.warning('请输入印章URL'); return }
-  seals.value.push({
-    pageIndex: pageNum.value - 1,
-    sealUrl: sealForm.sealUrl,
-    x: Math.random() * 100 + 50,
-    y: Math.random() * 100 + 50,
-    width: sealForm.width,
-    height: sealForm.height,
-    reason: sealForm.reason
-  })
-  sealModalVisible.value = false
+async function addSeal() {
+  if (!form.signerId) { message.warning('请输入 signerId'); return }
+  inserting.value = true
+  try {
+    const res = await api.get(`/cert/info/${form.signerId}`)
+    const cert = res.data
+    const seal = generateSealImage(cert.name, cert.certType)
+    seals.value.push({
+      pageIndex: pageNum.value - 1,
+      sealUrl: seal.dataUrl,
+      x: Math.random() * 100 + 50,
+      y: Math.random() * 100 + 50,
+      width: seal.width,
+      height: seal.height,
+      reason: ''
+    })
+    message.success('印章已插入')
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || '获取证书信息失败')
+  } finally {
+    inserting.value = false
+  }
 }
 
 function clearSeals() { seals.value = [] }

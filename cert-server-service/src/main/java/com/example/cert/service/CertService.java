@@ -6,7 +6,9 @@ import org.springframework.data.domain.Page;
 
 public interface CertService {
 
-    IssueResponse issue(String creditCode, String name, String department, String email, Integer validDays);
+    IssueResponse issue(int certType, String creditCode, String name, String department, String email, Integer validDays);
+
+    CertVO lookupBySignerId(String signerId);
 
     Page<CertVO> list(String creditCode, String name, String status, int page, int size);
 
