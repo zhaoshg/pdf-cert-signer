@@ -11,6 +11,8 @@ import com.example.cert.infra.ca.IssueResult;
 import com.example.cert.infra.ca.RootCaManager;
 import com.example.cert.service.CertService;
 import jakarta.persistence.criteria.Predicate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -29,6 +31,8 @@ import java.util.List;
 
 @Service
 public class CertServiceImpl implements CertService {
+
+    private static final Logger log = LoggerFactory.getLogger(CertServiceImpl.class);
 
     private final CertificateRepository certRepo;
     private final CertificateIssuer issuer;
@@ -94,6 +98,7 @@ public class CertServiceImpl implements CertService {
             return resp;
 
         } catch (Exception e) {
+            log.error("证书签发失败", e);
             throw new BizException("证书签发失败: " + e.getMessage());
         }
     }

@@ -8,22 +8,31 @@ import com.example.cert.domain.entity.Certificate;
 import com.example.cert.domain.enums.CertStatus;
 import com.example.cert.domain.repository.AuditLogRepository;
 import com.example.cert.domain.repository.CertificateRepository;
+import com.example.cert.infra.http.HttpClients;
 import com.example.cert.infra.signing.PdfSigner;
 import com.example.cert.infra.storage.FileStorageService;
 import com.example.cert.service.SigningService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 @Service
 public class SigningServiceImpl implements SigningService {
+
+    private static final Logger log = LoggerFactory.getLogger(SigningServiceImpl.class);
+
+    private static final HttpClient HTTP_CLIENT = HttpClients.TRUST_ALL;
 
     private final CertificateRepository certRepo;
     private final AuditLogRepository auditRepo;
@@ -93,18 +102,18 @@ public class SigningServiceImpl implements SigningService {
 
     private byte[] downloadPdf(String url) {
         try {
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) URI.create(url).toURL().openConnection();
-            conn.setConnectTimeout(30000);
-            conn.setReadTimeout(60000);
-            try (InputStream is = conn.getInputStream();
-                 ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = is.read(buf)) != -1) {
-                    baos.write(buf, 0, n);
-                }
-                return baos.toByteArray();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(60))
+                    .GET()
+                    .build();
+            HttpResponse<byte[]> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() != 200) {
+                throw new BizException("远程服务器返回 HTTP " + response.statusCode());
             }
+            return response.body();
+        } catch (BizException e) {
+            throw e;
         } catch (Exception e) {
             throw new BizException("PDF文件下载失败: " + e.getMessage());
         }

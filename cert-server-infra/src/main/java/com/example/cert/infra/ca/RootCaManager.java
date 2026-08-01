@@ -3,6 +3,9 @@ package com.example.cert.infra.ca;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.KeyUsage;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
@@ -81,6 +84,10 @@ public class RootCaManager {
 
         JcaX509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
                 issuer, serial, notBefore, notAfter, issuer, keyPair.getPublic());
+
+        certBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(0));
+        certBuilder.addExtension(Extension.keyUsage, true,
+                new KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign));
 
         ContentSigner signer = new JcaContentSignerBuilder("SHA256WithRSA")
                 .setProvider("BC")

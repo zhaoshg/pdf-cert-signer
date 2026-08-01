@@ -2,29 +2,31 @@ package com.example.cert.infra.signing;
 
 import com.example.cert.infra.ca.RootCaManager;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDPage;
-import org.apache.pdfbox.pdmodel.PDPageContentStream;
-import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureInterface;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureOptions;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.visible.PDVisibleSignDesigner;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.visible.PDVisibleSigProperties;
 import org.bouncycastle.cert.jcajce.JcaCertStore;
 import org.bouncycastle.cms.*;
 import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.tsp.TimeStampToken;
 import org.bouncycastle.util.Store;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URI;
 import java.security.KeyStore;
-import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
@@ -32,6 +34,8 @@ import java.util.*;
 
 @Component
 public class PdfSigner {
+
+    private static final Logger log = LoggerFactory.getLogger(PdfSigner.class);
 
     private final RootCaManager rootCaManager;
     private final TsaClient tsaClient;
@@ -44,20 +48,28 @@ public class PdfSigner {
     public byte[] sign(byte[] pdfData, byte[] p12Data, String password,
                        Map<Integer, List<SignPosition>> sealsByPage) throws Exception {
 
+        log.info("Signing PDF: {} bytes, {} seal pages", pdfData.length, sealsByPage.size());
         KeyStore ks = KeyStore.getInstance("PKCS12");
         ks.load(new ByteArrayInputStream(p12Data), password.toCharArray());
         String alias = ks.aliases().nextElement();
         PrivateKey privateKey = (PrivateKey) ks.getKey(alias, password.toCharArray());
         Certificate[] certChain = ks.getCertificateChain(alias);
         X509Certificate cert = (X509Certificate) certChain[0];
+        String signerName = extractCN(cert.getSubjectX500Principal().getName());
 
         PDDocument document = Loader.loadPDF(pdfData);
         ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
 
-        document.addSignature(createSignature(cert), new PdfBoxSignature(
-                privateKey, certChain, tsaClient, rootCaManager), createSignatureOptions(document, sealsByPage));
+        PDSignature signature = createSignature(cert);
+        SignatureOptions options = createSignatureOptions(document, sealsByPage, signerName);
+
+        log.info("Adding signature to document...");
+        document.addSignature(signature, new PdfBoxSignature(
+                privateKey, certChain, tsaClient, rootCaManager), options);
+        log.info("Saving incremental...");
         document.saveIncremental(signedOutput);
         document.close();
+        log.info("Signing complete: {} bytes output", signedOutput.size());
 
         return signedOutput.toByteArray();
     }
@@ -66,47 +78,80 @@ public class PdfSigner {
         PDSignature signature = new PDSignature();
         signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
         signature.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
-        signature.setName(cert.getSubjectX500Principal().getName());
+        signature.setName(extractCN(cert.getSubjectX500Principal().getName()));
+        signature.setReason("PDF电子签章");
+        signature.setLocation("CN");
         signature.setSignDate(Calendar.getInstance());
+
+        COSDictionary sigDict = signature.getCOSObject();
+        COSDictionary propBuild = new COSDictionary();
+
+        COSDictionary appDict = new COSDictionary();
+        appDict.setName(COSName.NAME, "PDFCertSigner");
+        propBuild.setItem(COSName.getPDFName("App"), appDict);
+
+        COSDictionary filterDict = new COSDictionary();
+        filterDict.setName(COSName.NAME, "Adobe.PPKLite");
+        filterDict.setItem(COSName.getPDFName("SubFilter"),
+                COSName.getPDFName("adbe.pkcs7.detached"));
+        filterDict.setInt(COSName.R, 0x20000);
+        propBuild.setItem(COSName.FILTER, filterDict);
+
+        sigDict.setItem(COSName.getPDFName("Prop_Build"), propBuild);
+
         return signature;
     }
 
-    private SignatureOptions createSignatureOptions(PDDocument document, Map<Integer, List<SignPosition>> sealsByPage) {
+    private SignatureOptions createSignatureOptions(PDDocument document,
+                                                     Map<Integer, List<SignPosition>> sealsByPage,
+                                                     String signerName) throws Exception {
         SignatureOptions options = new SignatureOptions();
         for (Map.Entry<Integer, List<SignPosition>> entry : sealsByPage.entrySet()) {
             int pageIndex = entry.getKey();
             if (pageIndex < document.getNumberOfPages()) {
                 for (SignPosition pos : entry.getValue()) {
-                    try {
-                        options.setVisualSignature(createAppearance(document, pos));
-                        options.setPage(pageIndex);
-                    } catch (Exception ignored) {
+                    byte[] imageData = loadImage(pos.sealUrl);
+                    if (imageData == null || imageData.length == 0) {
+                        log.warn("No seal image data, skipping visual");
+                        continue;
                     }
+                    log.info("Seal image: {} bytes, page {}", imageData.length, pageIndex);
+
+                    PDVisibleSignDesigner designer = new PDVisibleSignDesigner(
+                            document, new ByteArrayInputStream(imageData), pageIndex + 1);
+                    designer.xAxis(pos.x).yAxis(pos.y)
+                            .width(pos.width).height(pos.height)
+                            .adjustForRotation();
+
+                    PDVisibleSigProperties props = new PDVisibleSigProperties();
+                    props.signerName(signerName)
+                            .signatureReason("签章")
+                            .preferredSize(0)
+                            .page(pageIndex + 1)
+                            .visualSignEnabled(true)
+                            .setPdVisibleSignature(designer);
+                    props.buildSignature();
+
+                    options.setVisualSignature(props.getVisibleSignature());
+                    options.setPage(pageIndex);
                 }
             }
         }
         return options;
     }
 
-    private InputStream createAppearance(PDDocument document, SignPosition pos) throws Exception {
-        PDDocument tempDoc = new PDDocument();
-        float w = pos.width > 0 ? pos.width : 120;
-        float h = pos.height > 0 ? pos.height : 120;
-        PDPage page = new PDPage(new PDRectangle(w, h));
-        tempDoc.addPage(page);
-
-        try (PDPageContentStream cs = new PDPageContentStream(tempDoc, page)) {
-            byte[] imageData = loadImage(pos.sealUrl);
-            if (imageData != null) {
-                PDImageXObject img = PDImageXObject.createFromByteArray(tempDoc, imageData, "seal");
-                cs.drawImage(img, 0, 0, w, h);
+    private String extractCN(String dn) {
+        for (String part : dn.split(",")) {
+            String trimmed = part.trim();
+            if (trimmed.startsWith("CN=")) {
+                String cn = trimmed.substring(3);
+                if (cn.contains("(")) {
+                    cn = cn.substring(0, cn.indexOf("("));
+                }
+                return cn;
             }
         }
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        tempDoc.save(baos);
-        tempDoc.close();
-        return new ByteArrayInputStream(baos.toByteArray());
+        return dn;
     }
 
     private byte[] loadImage(String url) {
@@ -166,6 +211,7 @@ public class PdfSigner {
     }
 
     private static class PdfBoxSignature implements SignatureInterface {
+        private static final Logger log = LoggerFactory.getLogger(PdfBoxSignature.class);
         private final PrivateKey privateKey;
         private final Certificate[] certChain;
         private final TsaClient tsaClient;
@@ -181,6 +227,7 @@ public class PdfSigner {
         @Override
         public byte[] sign(InputStream content) throws IOException {
             try {
+                log.info("Starting CMS signature generation...");
                 List<X509Certificate> certList = new ArrayList<>();
                 for (Certificate c : certChain) {
                     certList.add((X509Certificate) c);
@@ -201,8 +248,45 @@ public class PdfSigner {
 
                 CMSTypedData msg = new CMSProcessableByteArray(readAllBytes(content));
                 CMSSignedData signedData = generator.generate(msg, false);
+                log.info("CMS signed data generated, size: {} bytes", signedData.getEncoded().length);
+
+                byte[] tsToken = tsaClient.getTimestampToken(
+                        signedData.getSignerInfos().getSigners().iterator().next().getSignature());
+                if (tsToken != null) {
+                    log.info("TSA response: {} bytes", tsToken.length);
+                    org.bouncycastle.tsp.TimeStampResponse tsResponse =
+                            new org.bouncycastle.tsp.TimeStampResponse(tsToken);
+                    TimeStampToken timeStampToken = tsResponse.getTimeStampToken();
+                    log.info("Timestamp token created: {}", timeStampToken.getTimeStampInfo().getGenTime());
+
+                    org.bouncycastle.cms.SignerInformation signer =
+                            signedData.getSignerInfos().getSigners().iterator().next();
+
+                    org.bouncycastle.asn1.cms.Attribute timestampAttr =
+                            new org.bouncycastle.asn1.cms.Attribute(
+                                    org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+                                    new org.bouncycastle.asn1.DERSet(
+                                            timeStampToken.toCMSSignedData().toASN1Structure()));
+                    log.info("Timestamp attribute created");
+
+                    org.bouncycastle.cms.SignerInformation newSigner =
+                            org.bouncycastle.cms.SignerInformation.replaceUnsignedAttributes(
+                                    signer, new org.bouncycastle.asn1.cms.AttributeTable(
+                                            new org.bouncycastle.asn1.ASN1EncodableVector()));
+                    newSigner = org.bouncycastle.cms.SignerInformation.replaceUnsignedAttributes(
+                            newSigner, new org.bouncycastle.asn1.cms.AttributeTable(timestampAttr));
+                    log.info("Signer updated with timestamp attribute");
+
+                    signedData = org.bouncycastle.cms.CMSSignedData.replaceSigners(
+                            signedData, new org.bouncycastle.cms.SignerInformationStore(newSigner));
+                    log.info("Timestamp added to signature, final size: {} bytes", signedData.getEncoded().length);
+                } else {
+                    log.info("No timestamp token (TSA not configured or request failed)");
+                }
+
                 return signedData.getEncoded();
             } catch (Exception e) {
+                log.error("CMS signing failed", e);
                 throw new IOException("签名失败", e);
             }
         }

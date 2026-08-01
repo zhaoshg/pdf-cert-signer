@@ -1,5 +1,7 @@
 package com.example.cert.infra.signing;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -13,6 +15,8 @@ import java.security.MessageDigest;
 @Component
 public class TsaClient {
 
+    private static final Logger log = LoggerFactory.getLogger(TsaClient.class);
+
     @Value("${cert.tsa.url:https://freetsa.org/tsr}")
     private String tsaUrl;
 
@@ -24,9 +28,11 @@ public class TsaClient {
 
     public byte[] getTimestampToken(byte[] documentHash) {
         if (tsaUrl == null || tsaUrl.isBlank()) {
+            log.info("TSA not configured, skipping");
             return null;
         }
         try {
+            log.info("Requesting timestamp from: {}", tsaUrl);
             byte[] request = buildTimestampRequest(documentHash);
             HttpURLConnection conn = (HttpURLConnection) URI.create(tsaUrl).toURL().openConnection();
             conn.setDoOutput(true);
@@ -39,7 +45,9 @@ public class TsaClient {
                 os.write(request);
             }
 
-            if (conn.getResponseCode() == 200) {
+            int responseCode = conn.getResponseCode();
+            log.info("TSA response: HTTP {}", responseCode);
+            if (responseCode == 200) {
                 try (InputStream is = conn.getInputStream()) {
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
                     byte[] buf = new byte[4096];
@@ -47,10 +55,15 @@ public class TsaClient {
                     while ((n = is.read(buf)) != -1) {
                         baos.write(buf, 0, n);
                     }
-                    return baos.toByteArray();
+                    byte[] token = baos.toByteArray();
+                    log.info("Timestamp token received: {} bytes", token.length);
+                    return token;
                 }
+            } else {
+                log.warn("TSA returned non-200: {}", responseCode);
             }
         } catch (Exception e) {
+            log.error("TSA request failed", e);
             if (failOnError) {
                 throw new RuntimeException("时间戳请求失败: " + e.getMessage(), e);
             }

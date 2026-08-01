@@ -1,7 +1,6 @@
 package com.example.cert.api;
 
 import com.example.cert.core.common.R;
-import com.example.cert.core.exception.BizException;
 import com.example.cert.domain.dto.IssueRequest;
 import com.example.cert.domain.dto.IssueResponse;
 import com.example.cert.domain.vo.CertVO;
@@ -12,9 +11,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 
 @RestController
 @RequestMapping("/api/v1/cert")

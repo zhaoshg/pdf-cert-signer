@@ -5,7 +5,9 @@ import org.slf4j.LoggerFactory;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.asn1.DEROctetString;
 import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.KeyUsage;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
@@ -44,11 +46,14 @@ public class CertificateIssuer {
     public IssueResult issue(int certType, String creditCode, String name, String department, String email, int validDays)
             throws Exception {
 
+        log.info("Starting certificate issuance: certType={}, name={}, creditCode={}", certType, name, creditCode);
         String signerId = signerIdGenerator.generate();
+        log.info("Generated signerId: {}", signerId);
 
         KeyPairGenerator keyPairGen = KeyPairGenerator.getInstance("RSA", "BC");
         keyPairGen.initialize(2048);
         KeyPair keyPair = keyPairGen.generateKeyPair();
+        log.info("RSA-2048 key pair generated");
 
         String cn = department != null && !department.isBlank() ? name + "(" + department + ")" : name;
         String dn = "CN=" + cn + ",OU=" + creditCode + ",O=PDFSigner,C=CN";
@@ -63,11 +68,16 @@ public class CertificateIssuer {
         JcaX509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
                 issuer, serial, notBefore, notAfter, subject, keyPair.getPublic());
 
+        certBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
+        certBuilder.addExtension(Extension.keyUsage, true,
+                new KeyUsage(KeyUsage.digitalSignature | KeyUsage.nonRepudiation));
+
         certBuilder.addExtension(
                 new ASN1ObjectIdentifier(OID_SIGNER_ID),
                 false,
                 new DEROctetString(signerId.getBytes()));
 
+        log.info("Signing certificate with root CA key...");
         ContentSigner signer = new JcaContentSignerBuilder("SHA256WithRSA")
                 .setProvider("BC")
                 .build(rootCaManager.getRootPrivateKey());
@@ -76,8 +86,10 @@ public class CertificateIssuer {
         X509Certificate cert = new JcaX509CertificateConverter()
                 .setProvider("BC")
                 .getCertificate(certHolder);
+        log.info("Certificate signed and converted: {}", cert.getSubjectX500Principal());
 
-        KeyStore p12 = KeyStore.getInstance("PKCS12");
+        log.info("Storing into PKCS12 keystore...");
+        KeyStore p12 = KeyStore.getInstance("PKCS12", "BC");
         p12.load(null, null);
         char[] password = keySecret.toCharArray();
         p12.setKeyEntry("user-cert", keyPair.getPrivate(), password,
@@ -86,8 +98,7 @@ public class CertificateIssuer {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         p12.store(baos, password);
         byte[] p12Data = baos.toByteArray();
-
-        Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+        log.info("PKCS12 keystore created, size: {} bytes", p12Data.length);
 
         LocalDateTime validFrom = LocalDateTime.ofInstant(notBefore.toInstant(), ZoneId.systemDefault());
         LocalDateTime validTo = LocalDateTime.ofInstant(notAfter.toInstant(), ZoneId.systemDefault());

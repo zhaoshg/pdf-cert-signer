@@ -24,6 +24,11 @@ const router = createRouter({
       component: () => import('../views/signing/SignCanvas.vue')
     },
     {
+      path: '/sign-page',
+      name: 'SignPage',
+      component: () => import('../views/signing/SignPage.vue')
+    },
+    {
       path: '/audit',
       name: 'Audit',
       component: () => import('../views/audit/AuditLog.vue')
@@ -33,7 +38,9 @@ const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   const auth = useAuthStore()
-  if (to.path !== '/login' && !auth.token) {
+  if (to.path === '/sign-page') {
+    next()
+  } else if (to.path !== '/login' && !auth.token) {
     next('/login')
   } else {
     next()

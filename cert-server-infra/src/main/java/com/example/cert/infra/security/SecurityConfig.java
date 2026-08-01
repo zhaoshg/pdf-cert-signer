@@ -34,6 +34,8 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/auth/login").permitAll()
+                        .requestMatchers("/api/v1/cert/download/**").permitAll()
+                        .requestMatchers("/api/v1/cert/info/**").permitAll()
                         .requestMatchers("/api/v1/auth/**").authenticated()
                         .requestMatchers("/api/v1/cert/**").authenticated()
                         .requestMatchers("/api/v1/pdf/sign").permitAll()

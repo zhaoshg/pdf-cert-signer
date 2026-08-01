@@ -23,9 +23,9 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
+import { useAuthStore } from '../../stores/auth'
 import { UserOutlined, LockOutlined } from '@ant-design/icons-vue'
-import api from '../api'
+import api from '../../api'
 import { message } from 'ant-design-vue'
 
 const router = useRouter()
