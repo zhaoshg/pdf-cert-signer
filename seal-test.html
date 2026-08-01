@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>印章生成测试</title>
+    <style>
+        body { background: #f0f0f0; padding: 20px; font-family: sans-serif; }
+        canvas { border: 1px dashed #ccc; margin: 20px; }
+        .preview { display: flex; align-items: flex-start; flex-wrap: wrap; }
+        .card { background: #fff; padding: 20px; margin: 10px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); text-align: center; }
+        .card h3 { margin-top: 0; }
+        .btn { display: inline-block; margin: 8px; padding: 6px 16px; background: #1890ff; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        .btn:hover { background: #0e7ae6; }
+    </style>
+</head>
+<body>
+    <h2>印章生成测试</h2>
+    <div class="preview">
+        <div class="card">
+            <h3>企业圆章 — 山高荃银供应链管理有限公司</h3>
+            <canvas id="roundCanvas"></canvas><br>
+            <button class="btn" onclick="downloadImg('roundCanvas','企业圆章_山高荃银供应链管理有限公司.png')">下载PNG</button>
+        </div>
+        <div class="card">
+            <h3>企业圆章 — 上海科技有限公司</h3>
+            <canvas id="roundShortCanvas"></canvas><br>
+            <button class="btn" onclick="downloadImg('roundShortCanvas','企业圆章_上海科技有限公司.png')">下载PNG</button>
+        </div>
+        <div class="card">
+            <h3>个人方章 — 赵曙光</h3>
+            <canvas id="squareCanvas"></canvas><br>
+            <button class="btn" onclick="downloadImg('squareCanvas','个人方章_赵曙光.png')">下载PNG</button>
+        </div>
+        <div class="card">
+            <h3>个人方章 — 李明</h3>
+            <canvas id="squareShortCanvas"></canvas><br>
+            <button class="btn" onclick="downloadImg('squareShortCanvas','个人方章_李明.png')">下载PNG</button>
+        </div>
+    </div>
+
+<script>
+/**
+ * 优化版印章生成方法 (动态调整画布大小、跨端楷体、黑字无框)
+ */
+function generateSeal(sealType, name) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    let cx, cy, bottomY;
+
+    if (sealType === 1) {
+        // ================= 【圆章逻辑】 =================
+        // 圆章画布较大，保持 200x230
+        canvas.width = 200;
+        canvas.height = 230; 
+        cx = canvas.width / 2;
+        cy = 100; // 圆心 Y 坐标
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.strokeStyle = '#FF0000';
+        ctx.fillStyle = '#FF0000';
+        ctx.lineWidth = 4;
+
+        const radius = 86;
+        bottomY = cy + radius; // 圆形底部坐标
+        
+        // 画外圆和内圆
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+        ctx.stroke();
+
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius - 5, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.lineWidth = 4;
+
+        // 画五角星
+        drawStar(ctx, cx, cy + 8, 28); // 依赖你原有的 drawStar 方法
+
+        // 环形文字
+        ctx.font = 'bold 18px "SimSun", "宋体", serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const textRadius = radius - 18;
+        const totalAngle = Math.PI * 1.1;
+        const startAngle = -Math.PI / 2 - totalAngle / 2;
+
+        for (let i = 0; i < name.length; i++) {
+            let angle = startAngle + (i / (name.length - 1)) * totalAngle;
+            if (name.length === 1) angle = -Math.PI / 2;
+
+            ctx.save();
+            ctx.translate(
+                cx + Math.cos(angle) * textRadius,
+                cy + Math.sin(angle) * textRadius
+            );
+            ctx.rotate(angle + Math.PI / 2);
+            ctx.fillText(name[i], 0, 0);
+            ctx.restore();
+        }
+
+    } else {
+        // ================= 【个人签名(原方章)逻辑】 =================
+        // 【核心修改1】动态缩减画布高度，彻底干掉上下多余的透明留白！
+        canvas.width = 220; // 稍微加宽，让3-4个字不拥挤
+        canvas.height = 90; // 高度直接压缩到 90
+        
+        cx = canvas.width / 2;
+        cy = 36; // 字体居中的 Y 坐标
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 【核心修改2】改用跨端楷体，并且设置颜色为纯黑
+        ctx.fillStyle = '#000000'; 
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // 【核心修改3】字体放大，根据名字长度动态微调，保证撑满且不越界
+        if (name.length <= 2) {
+            ctx.font = 'bold 44px "STKaiti", "华文楷体", "KaiTi", "楷体", serif';
+        } else if (name.length === 3) {
+            ctx.font = 'bold 40px "STKaiti", "华文楷体", "KaiTi", "楷体", serif';
+        } else {
+            ctx.font = 'bold 34px "STKaiti", "华文楷体", "KaiTi", "楷体", serif';
+        }
+        
+        // 直接画字，去掉红框
+        ctx.fillText(name, cx, cy);
+
+        // 记录黑字底部的 Y 坐标（大概在中心点往下走半个字号的距离）
+        bottomY = cy + 20; 
+    }
+
+    // ================= 【底部蓝色日期】 =================
+    // 日期逻辑两者通用，紧贴着 bottomY 绘制
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+
+    ctx.fillStyle = '#0000FF'; // 蓝色日期
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    
+    // 日期紧贴印章底部，留 8px 的舒适间距
+    ctx.fillText(dateStr, cx, bottomY + 8); 
+
+    // 这里根据你的需求返回 canvas 对象，或者 return canvas.toDataURL('image/png')
+    return canvas; 
+}
+function drawStar(ctx, cx, cy, outerRadius) {
+    const innerRadius = outerRadius * 0.382;
+    let rot = Math.PI / 2 * 3;
+    const step = Math.PI / 5;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - outerRadius);
+    for (let i = 0; i < 5; i++) {
+        ctx.lineTo(cx + Math.cos(rot) * outerRadius, cy + Math.sin(rot) * outerRadius);
+        rot += step;
+        ctx.lineTo(cx + Math.cos(rot) * innerRadius, cy + Math.sin(rot) * innerRadius);
+        rot += step;
+    }
+    ctx.lineTo(cx, cy - outerRadius);
+    ctx.closePath();
+    ctx.fill();
+}
+
+function downloadImg(canvasId, filename) {
+    const src = document.getElementById(canvasId);
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = src.toDataURL('image/png');
+    link.click();
+}
+
+// Render all
+function renderTo(id, sealType, name) {
+    const displayCanvas = document.getElementById(id);
+    const src = generateSeal(sealType, name);
+    displayCanvas.width = src.width;
+    displayCanvas.height = src.height;
+    displayCanvas.getContext('2d').drawImage(src, 0, 0);
+}
+
+renderTo('roundCanvas', 1, '山高荃银供应链管理有限公司');
+renderTo('roundShortCanvas', 1, '上海科技有限公司');
+renderTo('squareCanvas', 2, '赵曙光');
+renderTo('squareShortCanvas', 2, '李明');
+</script>
+</body>
+</html>
