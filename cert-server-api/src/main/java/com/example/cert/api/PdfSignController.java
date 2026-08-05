@@ -33,12 +33,25 @@ public class PdfSignController {
         this.signingService = signingService;
     }
 
+    /**
+     * PDF 电子签章接口。
+     *
+     * 入参 SignRequest：{@code signerId}（签署人ID）、{@code pdfUrl}（待签 PDF 下载地址）、
+     * {@code signatures}（签章位置列表，含页码/印章图片地址/坐标/尺寸/reason）。
+     * 服务端流程：校验签署人证书有效 → 下载 PDF → 逐页盖章并做数字签名 → 上传存储 → 写审计日志。
+     *
+     * @return 已签章 PDF 地址 + 证书主题 + 签章时间
+     */
     @PostMapping("/sign")
     public R<SignResponse> sign(@Valid @RequestBody SignRequest request) {
         SignResponse resp = signingService.sign(request);
         return R.ok("签署成功", resp);
     }
 
+    /**
+     * PDF 代理端点：从前端绕开 CORS，代为下载远程 PDF 返回给浏览器渲染。
+     * 前端签章页通过本端点加载待签 PDF（配合 sign 接口中的 pdfUrl）。
+     */
     @GetMapping("/fetch")
     public ResponseEntity<byte[]> fetchPdf(@RequestParam String url) {
         log.info("Fetching PDF from: {}", url);

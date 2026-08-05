@@ -50,6 +50,7 @@ public class SigningServiceImpl implements SigningService {
     @Override
     @Transactional
     public SignResponse sign(SignRequest request) {
+        // 1. 校验签署人证书：必须存在且状态为 ACTIVE、未吊销、未过期
         Certificate cert = certRepo.findBySignerIdAndStatus(request.getSignerId(), CertStatus.ACTIVE)
                 .orElseThrow(() -> new BizException("未找到有效证书"));
 
@@ -60,23 +61,33 @@ public class SigningServiceImpl implements SigningService {
             throw new BizException("您的数字证书已过期，请先重新申请/更新证书");
         }
 
+        // 2. 下载待签 PDF 并计算原始哈希（用于审计追溯原始文件）
         byte[] pdfData = downloadPdf(request.getPdfUrl());
         String pdfHash = sha256(pdfData);
 
+        // 3. 按页码归集签章位置，传递给 PdfSigner 逐页盖章；
+        //    reason 取第一个非空签章原因，作为整份 PDF 数字签名的 Reason 字段
         Map<Integer, List<PdfSigner.SignPosition>> seals = new HashMap<>();
+        String reason = null;
         for (SignRequest.SignPosition sp : request.getSignatures()) {
             seals.computeIfAbsent(sp.getPageIndex(), k -> new ArrayList<>())
                     .add(new PdfSigner.SignPosition(sp.getSealUrl(), sp.getX(), sp.getY(), sp.getWidth(), sp.getHeight()));
+            if (reason == null && sp.getReason() != null && !sp.getReason().isBlank()) {
+                reason = sp.getReason();
+            }
         }
 
         try {
+            // 4. 用签署人证书私钥执行视觉签章 + 数字签名，产出已签章 PDF
             String p12Password = "cert-secret-key-32bytes!!";
-            byte[] signedPdf = pdfSigner.sign(pdfData, cert.getP12Data(), p12Password, seals);
+            byte[] signedPdf = pdfSigner.sign(pdfData, cert.getP12Data(), p12Password, reason, seals);
 
+            // 5. 上传已签章 PDF 到文件存储，返回可访问 URL
             String signedPdfHash = sha256(signedPdf);
             String fileName = "signed_" + request.getSignerId() + "_" + System.currentTimeMillis() + ".pdf";
             String signedUrl = storageService.upload(signedPdf, fileName);
 
+            // 6. 写审计日志：记录签署人、证书、PDF 哈希、签章时间，便于事后追溯
             AuditLog log = new AuditLog();
             log.setSignerId(request.getSignerId());
             log.setCreditCode(cert.getCreditCode());
@@ -87,6 +98,7 @@ public class SigningServiceImpl implements SigningService {
             log.setSignTime(LocalDateTime.now());
             auditRepo.save(log);
 
+            // 7. 组装响应返回给调用方
             SignResponse resp = new SignResponse();
             resp.setSignedPdfUrl(signedUrl);
             resp.setCertSubject(cert.getCertSubject());

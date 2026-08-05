@@ -37,6 +37,9 @@ public class PdfSigner {
 
     private static final Logger log = LoggerFactory.getLogger(PdfSigner.class);
 
+    /** Reason 字段最大长度，避免过长文本被原样写入签名内容 */
+    private static final int MAX_REASON_LENGTH = 128;
+
     private final RootCaManager rootCaManager;
     private final TsaClient tsaClient;
 
@@ -45,7 +48,7 @@ public class PdfSigner {
         this.tsaClient = tsaClient;
     }
 
-    public byte[] sign(byte[] pdfData, byte[] p12Data, String password,
+    public byte[] sign(byte[] pdfData, byte[] p12Data, String password, String reason,
                        Map<Integer, List<SignPosition>> sealsByPage) throws Exception {
 
         log.info("Signing PDF: {} bytes, {} seal pages", pdfData.length, sealsByPage.size());
@@ -60,8 +63,8 @@ public class PdfSigner {
         PDDocument document = Loader.loadPDF(pdfData);
         ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
 
-        PDSignature signature = createSignature(cert);
-        SignatureOptions options = createSignatureOptions(document, sealsByPage, signerName);
+        PDSignature signature = createSignature(cert, reason);
+        SignatureOptions options = createSignatureOptions(document, sealsByPage, signerName, reason);
 
         log.info("Adding signature to document...");
         document.addSignature(signature, new PdfBoxSignature(
@@ -74,12 +77,16 @@ public class PdfSigner {
         return signedOutput.toByteArray();
     }
 
-    private PDSignature createSignature(X509Certificate cert) {
+    private PDSignature createSignature(X509Certificate cert, String reason) {
         PDSignature signature = new PDSignature();
         signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
         signature.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
         signature.setName(extractCN(cert.getSubjectX500Principal().getName()));
-        signature.setReason("PDF电子签章");
+        String effectiveReason = reason == null ? "" : reason.trim();
+        if (effectiveReason.length() > MAX_REASON_LENGTH) {
+            effectiveReason = effectiveReason.substring(0, MAX_REASON_LENGTH);
+        }
+        signature.setReason(effectiveReason.isEmpty() ? "PDF电子签章" : effectiveReason);
         signature.setLocation("CN");
         signature.setSignDate(Calendar.getInstance());
 
@@ -104,8 +111,10 @@ public class PdfSigner {
 
     private SignatureOptions createSignatureOptions(PDDocument document,
                                                      Map<Integer, List<SignPosition>> sealsByPage,
-                                                     String signerName) throws Exception {
+                                                     String signerName,
+                                                     String reason) throws Exception {
         SignatureOptions options = new SignatureOptions();
+        String visualReason = reason == null || reason.isBlank() ? "签章" : reason;
         for (Map.Entry<Integer, List<SignPosition>> entry : sealsByPage.entrySet()) {
             int pageIndex = entry.getKey();
             if (pageIndex < document.getNumberOfPages()) {
@@ -125,7 +134,7 @@ public class PdfSigner {
 
                     PDVisibleSigProperties props = new PDVisibleSigProperties();
                     props.signerName(signerName)
-                            .signatureReason("签章")
+                            .signatureReason(visualReason)
                             .preferredSize(0)
                             .page(pageIndex + 1)
                             .visualSignEnabled(true)
