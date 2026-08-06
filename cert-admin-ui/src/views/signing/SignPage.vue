@@ -8,12 +8,12 @@
 
     <div style="position:relative; display:inline-block; margin-top:8px">
       <div v-for="(seal, i) in seals" :key="i" class="seal-overlay"
-           :style="{ left: seal.x + 'px', top: seal.y + 'px', width: seal.width + 'px', height: seal.height + 'px' }"
+           :style="{ left: seal.x * scale + 'px', top: seal.y * scale + 'px', width: seal.width * scale + 'px', height: seal.height * scale + 'px' }"
            @mousedown="startDrag($event, i)">
         <img v-if="seal.sealUrl" :src="seal.sealUrl" style="width:100%;height:100%;object-fit:contain" />
         <a-button size="small" danger class="seal-close" @click="removeSeal(i)">X</a-button>
       </div>
-      <canvas ref="pdfCanvas" style="border:1px solid #d9d9d9; max-width:100%" />
+      <canvas ref="pdfCanvas" style="border:1px solid #d9d9d9" />
       <div class="pager">
         <a-button @click="prevPage" :disabled="pageNum <= 1">上一页</a-button>
         <span>第 {{ pageNum }} / {{ totalPages }} 页</span>
@@ -30,7 +30,7 @@ import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import api from '../../api'
-import { generateSealImage } from '../../utils/sealUtils'
+import { generateSealImage, getSealPdfSize } from '../../utils/sealUtils'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
@@ -94,13 +94,15 @@ async function addSeal() {
     const res = await api.get(`/cert/info/${signerId.value}`)
     const cert = res.data
     const seal = generateSealImage(cert.name, cert.certType)
+    const pdfSize = getSealPdfSize(cert.certType)
     seals.value.push({
       pageIndex: pageNum.value - 1,
       sealUrl: seal.dataUrl,
+      // x/y 为 PDF 左上角原点坐标系下的 pt 坐标，渲染时乘 scale 换算成屏幕像素
       x: Math.random() * 100 + 50,
       y: Math.random() * 100 + 50,
-      width: seal.width,
-      height: seal.height,
+      width: pdfSize.width,
+      height: pdfSize.height,
       reason: ''
     })
     message.success('印章已插入')
@@ -116,11 +118,13 @@ function removeSeal(i: number) { seals.value.splice(i, 1) }
 
 function startDrag(e: MouseEvent, i: number) {
   const seal = seals.value[i]
-  const startX = e.clientX - seal.x
-  const startY = e.clientY - seal.y
+  // 记录按下时鼠标相对印章左上角的偏移（屏幕像素），并换算回 PDF pt
+  const startX = e.clientX - seal.x * scale.value
+  const startY = e.clientY - seal.y * scale.value
   function onMove(ev: MouseEvent) {
-    seal.x = ev.clientX - startX
-    seal.y = ev.clientY - startY
+    // 拖拽增量除以当前缩放，换算回 PDF pt 坐标系
+    seal.x = (ev.clientX - startX) / scale.value
+    seal.y = (ev.clientY - startY) / scale.value
   }
   function onUp() {
     document.removeEventListener('mousemove', onMove)

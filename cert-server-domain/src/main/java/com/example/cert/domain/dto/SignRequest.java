@@ -31,8 +31,9 @@ public class SignRequest {
 
     /**
      * 单个签章位置（视觉签章定位信息）。
-     * 注意：x/y 为 PDF 页面左上角原点坐标系，与 PDF 渲染时的缩放无关，
-     * 前端若在缩放视图下拖拽，需自行按缩放比例换算后再提交。
+     * 坐标均为 PDF 左上角原点坐标系（x 向右、y 向下，单位 pt，1pt ≈ 0.3528mm）。
+     * 前端在缩放视图中拖拽时，需将屏幕像素除以缩放因子换算回 PDF pt 后再提交；
+     * 尺寸 width/height 建议与印章图片宽高比一致，避免盖章时被拉伸变形。
      */
     @Data
     public static class SignPosition {
@@ -43,13 +44,13 @@ public class SignRequest {
         /** 印章图片下载地址，可为远程 URL */
         private String sealUrl;
 
-        /** 印章中心点 x 坐标（PDF 用户空间单位，默认以 pt 计） */
+        /** 印章矩形左上角 x 坐标（PDF pt） */
         private float x;
-        /** 印章中心点 y 坐标（PDF 用户空间单位，默认以 pt 计） */
+        /** 印章矩形左上角 y 坐标（PDF pt） */
         private float y;
-        /** 印章宽度，默认 120 */
+        /** 印章宽度（PDF pt） */
         private float width = 120;
-        /** 印章高度，默认 120 */
+        /** 印章高度（PDF pt） */
         private float height = 120;
         /** 签章原因，写入数字签名的 Reason 字段；为空时后端回退为"PDF电子签章" */
         private String reason;
