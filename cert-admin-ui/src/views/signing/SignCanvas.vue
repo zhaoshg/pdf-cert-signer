@@ -11,6 +11,7 @@
         <a-form-item>
           <a-space>
             <a-button type="primary" @click="loadPdf">加载PDF</a-button>
+            <a-input v-model:value="reason" placeholder="签章原因（可空）" style="width:200px" allow-clear />
             <a-button :loading="inserting" @click="addSeal">插入印章</a-button>
             <a-button @click="clearSeals">清除印章</a-button>
             <a-button type="primary" danger :loading="signing" @click="doSign">确认签章</a-button>
@@ -54,6 +55,7 @@ const totalPages = ref(0)
 const scale = ref(1)
 const signing = ref(false)
 const inserting = ref(false)
+const reason = ref('')
 const seals = ref<any[]>([])
 
 let pdfDoc: any = null
@@ -104,7 +106,7 @@ async function addSeal() {
       y: Math.random() * 100 + 50,
       width: pdfSize.width,
       height: pdfSize.height,
-      reason: ''
+      reason: reason.value
     })
     message.success('印章已插入')
   } catch (e: any) {
@@ -139,6 +141,8 @@ async function doSign() {
   if (!form.signerId || seals.value.length === 0) { message.warning('请先加载PDF并添加印章'); return }
   signing.value = true
   try {
+    // 提交前将所有印章的 reason 同步为输入框当前值（后端取第一个非空 reason）
+    seals.value.forEach(s => { s.reason = reason.value })
     const res = await api.post('/pdf/sign', {
       signerId: form.signerId,
       pdfUrl: form.pdfUrl,

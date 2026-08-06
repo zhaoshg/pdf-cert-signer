@@ -10,19 +10,8 @@
 
 ## 待开发任务
 
-### 1. 印章缩放
-- 签章时印章应支持缩放调整大小
-- 前端 SignCanvas/SignPage 需增加缩放控件（拖拽角/滑块）
-
-### 2. Bug修复：PDF缩放后签章位置偏移
-- 复现：PDF 缩放后拖拽印章，签章后实际位置与用户所见不一致
-- 原因推测：坐标未按缩放比例换算
-- 需在 CoordinateConverter 或前端坐标计算中考虑 zoom 因子
-
 ### 3. PdfSigner.createSignature 增加 reason 参数
-- `signature.setReason(reason)` 当前写死为 "PDF电子签章"
-- 改为从签章接口参数传入，支持调用方自定义签章原因
-- 涉及：SignRequest DTO、PdfSigner.sign()、PdfSignController、前端表单
+- 修改前端页面（PDF签章页面），增加reason输入框。
 
 ### 4. 场景证书签章
 - 业务场景：临时生成短期证书 → 签章 → 立即废弃
