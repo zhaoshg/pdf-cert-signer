@@ -11,3 +11,5 @@ dist/
 .cert-storage/
 root-ca.p12
 application.yml
+start-server.sh
+stop-server.sh
