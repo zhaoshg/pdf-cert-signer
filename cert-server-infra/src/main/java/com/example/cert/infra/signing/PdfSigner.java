@@ -60,21 +60,44 @@ public class PdfSigner {
         X509Certificate cert = (X509Certificate) certChain[0];
         String signerName = extractCN(cert.getSubjectX500Principal().getName());
 
-        PDDocument document = Loader.loadPDF(pdfData);
-        ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
+        // PDFBox 限制一个文档实例只能 addSignature 一次，因此逐个印章增量签名：
+        // 每个印章签完后保存为新文件，下一次以该文件为输入继续盖章。
+        byte[] currentPdf = pdfData;
+        int sealCount = 0;
+        for (Map.Entry<Integer, List<SignPosition>> entry : sealsByPage.entrySet()) {
+            int pageIndex = entry.getKey();
+            if (pageIndex < 0 || pageIndex >= Loader.loadPDF(currentPdf).getNumberOfPages()) {
+                log.warn("Page index {} out of range, skipping", pageIndex);
+                continue;
+            }
+            for (SignPosition pos : entry.getValue()) {
+                SignatureOptions options = createSignatureOptions(
+                        currentPdf, pos, pageIndex, signerName, reason);
+                if (options == null) {
+                    log.warn("Skip seal on page {}: no image data", pageIndex);
+                    continue;
+                }
 
-        PDSignature signature = createSignature(cert, reason);
-        SignatureOptions options = createSignatureOptions(document, sealsByPage, signerName, reason);
+                PDDocument document = Loader.loadPDF(currentPdf);
+                ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
+                PDSignature signature = createSignature(cert, reason);
+                log.info("Adding signature #{} on page {}", sealCount + 1, pageIndex + 1);
+                document.addSignature(signature, new PdfBoxSignature(
+                        privateKey, certChain, tsaClient, rootCaManager), options);
+                document.saveIncremental(signedOutput);
+                document.close();
 
-        log.info("Adding signature to document...");
-        document.addSignature(signature, new PdfBoxSignature(
-                privateKey, certChain, tsaClient, rootCaManager), options);
-        log.info("Saving incremental...");
-        document.saveIncremental(signedOutput);
-        document.close();
-        log.info("Signing complete: {} bytes output", signedOutput.size());
+                currentPdf = signedOutput.toByteArray();
+                sealCount++;
+            }
+        }
 
-        return signedOutput.toByteArray();
+        if (sealCount == 0) {
+            throw new IllegalStateException("没有可签章的印章图片");
+        }
+
+        log.info("Signing complete: {} signatures, {} bytes output", sealCount, currentPdf.length);
+        return currentPdf;
     }
 
     private PDSignature createSignature(X509Certificate cert, String reason) {
@@ -109,44 +132,47 @@ public class PdfSigner {
         return signature;
     }
 
-    private SignatureOptions createSignatureOptions(PDDocument document,
-                                                     Map<Integer, List<SignPosition>> sealsByPage,
+    /**
+     * 为单个签章位置构建视觉签名选项；印章图片加载失败时返回 null。
+     * 传入当前待签 PDF 字节，内部临时加载文档用于计算视觉签名位置。
+     */
+    private SignatureOptions createSignatureOptions(byte[] pdfData,
+                                                     SignPosition pos,
+                                                     int pageIndex,
                                                      String signerName,
                                                      String reason) throws Exception {
-        SignatureOptions options = new SignatureOptions();
-        String visualReason = reason == null || reason.isBlank() ? "签章" : reason;
-        for (Map.Entry<Integer, List<SignPosition>> entry : sealsByPage.entrySet()) {
-            int pageIndex = entry.getKey();
-            if (pageIndex < document.getNumberOfPages()) {
-                for (SignPosition pos : entry.getValue()) {
-                    byte[] imageData = loadImage(pos.sealUrl);
-                    if (imageData == null || imageData.length == 0) {
-                        log.warn("No seal image data, skipping visual");
-                        continue;
-                    }
-                    log.info("Seal image: {} bytes, page {}", imageData.length, pageIndex);
-
-                    PDVisibleSignDesigner designer = new PDVisibleSignDesigner(
-                            document, new ByteArrayInputStream(imageData), pageIndex + 1);
-                    designer.xAxis(pos.x).yAxis(pos.y)
-                            .width(pos.width).height(pos.height)
-                            .adjustForRotation();
-
-                    PDVisibleSigProperties props = new PDVisibleSigProperties();
-                    props.signerName(signerName)
-                            .signatureReason(visualReason)
-                            .preferredSize(0)
-                            .page(pageIndex + 1)
-                            .visualSignEnabled(true)
-                            .setPdVisibleSignature(designer);
-                    props.buildSignature();
-
-                    options.setVisualSignature(props.getVisibleSignature());
-                    options.setPage(pageIndex);
-                }
-            }
+        byte[] imageData = loadImage(pos.sealUrl);
+        if (imageData == null || imageData.length == 0) {
+            return null;
         }
-        return options;
+        log.info("Seal image: {} bytes, page {}", imageData.length, pageIndex);
+
+        PDDocument document = Loader.loadPDF(pdfData);
+        try {
+            PDVisibleSignDesigner designer = new PDVisibleSignDesigner(
+                    document, new ByteArrayInputStream(imageData), pageIndex + 1);
+            designer.xAxis(pos.x).yAxis(pos.y)
+                    .width(pos.width).height(pos.height)
+                    .adjustForRotation();
+
+            String visualReason = reason == null || reason.isBlank() ? "签章" : reason;
+
+            PDVisibleSigProperties props = new PDVisibleSigProperties();
+            props.signerName(signerName)
+                    .signatureReason(visualReason)
+                    .preferredSize(0)
+                    .page(pageIndex + 1)
+                    .visualSignEnabled(true)
+                    .setPdVisibleSignature(designer);
+            props.buildSignature();
+
+            SignatureOptions options = new SignatureOptions();
+            options.setVisualSignature(props.getVisibleSignature());
+            options.setPage(pageIndex);
+            return options;
+        } finally {
+            document.close();
+        }
     }
 
     private String extractCN(String dn) {

@@ -10,3 +10,4 @@ dist/
 .idea/
 .cert-storage/
 root-ca.p12
+application.yml
