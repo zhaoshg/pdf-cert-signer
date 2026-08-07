@@ -13,3 +13,5 @@ root-ca.p12
 application.yml
 start-server.sh
 stop-server.sh
+start-server.ps1
+stop-server.ps1
