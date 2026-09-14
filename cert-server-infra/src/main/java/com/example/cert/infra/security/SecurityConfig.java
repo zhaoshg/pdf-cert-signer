@@ -39,6 +39,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/**").authenticated()
                         .requestMatchers("/api/v1/cert/**").authenticated()
                         .requestMatchers("/api/v1/pdf/sign").permitAll()
+                        .requestMatchers("/api/v1/pdf/sign-scenario").permitAll()
                         .requestMatchers("/api/v1/audit/**").authenticated()
                         .anyRequest().permitAll()
                 )

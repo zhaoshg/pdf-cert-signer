@@ -3,6 +3,7 @@ package com.example.cert.api;
 import com.example.cert.core.common.R;
 import com.example.cert.core.exception.BizException;
 import com.example.cert.domain.dto.SignRequest;
+import com.example.cert.domain.dto.ScenarioSignRequest;
 import com.example.cert.domain.dto.SignResponse;
 import com.example.cert.infra.http.HttpClients;
 import com.example.cert.service.SigningService;
@@ -45,6 +46,19 @@ public class PdfSignController {
     @PostMapping("/sign")
     public R<SignResponse> sign(@Valid @RequestBody SignRequest request) {
         SignResponse resp = signingService.sign(request);
+        return R.ok("签署成功", resp);
+    }
+
+    /**
+     * 场景证书签章接口：临时签发短期证书 → 签章 → 立即吊销。
+     *
+     * 入参 ScenarioSignRequest：签发字段（certType/creditCode/name/department/email/validDays，
+     * validDays 缺省 1 天）+ 签章字段（pdfUrl/signatures）。p12 私钥仅内存使用、不返回；
+     * 响应 tempSignerId 可追溯本次临时证书，签章失败也会吊销临时证。
+     */
+    @PostMapping("/sign-scenario")
+    public R<SignResponse> signScenario(@Valid @RequestBody ScenarioSignRequest request) {
+        SignResponse resp = signingService.signScenario(request);
         return R.ok("签署成功", resp);
     }
 

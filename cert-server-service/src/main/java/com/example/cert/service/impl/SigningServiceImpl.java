@@ -1,6 +1,7 @@
 package com.example.cert.service.impl;
 
 import com.example.cert.core.exception.BizException;
+import com.example.cert.domain.dto.ScenarioSignRequest;
 import com.example.cert.domain.dto.SignRequest;
 import com.example.cert.domain.dto.SignResponse;
 import com.example.cert.domain.entity.AuditLog;
@@ -8,13 +9,18 @@ import com.example.cert.domain.entity.Certificate;
 import com.example.cert.domain.enums.CertStatus;
 import com.example.cert.domain.repository.AuditLogRepository;
 import com.example.cert.domain.repository.CertificateRepository;
+import com.example.cert.infra.ca.CertificateIssuer;
+import com.example.cert.infra.ca.IssueResult;
 import com.example.cert.infra.http.HttpClients;
 import com.example.cert.infra.signing.PdfSigner;
 import com.example.cert.infra.storage.FileStorageService;
 import com.example.cert.service.SigningService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
@@ -38,13 +44,22 @@ public class SigningServiceImpl implements SigningService {
     private final AuditLogRepository auditRepo;
     private final PdfSigner pdfSigner;
     private final FileStorageService storageService;
+    private final CertificateIssuer issuer;
+    /** 自注入（代理对象），编排方法经它调用事务方法，避免同类自调用事务失效 */
+    private final SigningServiceImpl self;
+
+    @Value("${cert.key-secret:cert-secret-key-32bytes!!}")
+    private String keySecret;
 
     public SigningServiceImpl(CertificateRepository certRepo, AuditLogRepository auditRepo,
-                              PdfSigner pdfSigner, FileStorageService storageService) {
+                              PdfSigner pdfSigner, FileStorageService storageService,
+                              CertificateIssuer issuer, @Lazy SigningServiceImpl self) {
         this.certRepo = certRepo;
         this.auditRepo = auditRepo;
         this.pdfSigner = pdfSigner;
         this.storageService = storageService;
+        this.issuer = issuer;
+        this.self = self;
     }
 
     @Override
@@ -61,15 +76,103 @@ public class SigningServiceImpl implements SigningService {
             throw new BizException("您的数字证书已过期，请先重新申请/更新证书");
         }
 
+        return self.signWithCert(cert, request.getPdfUrl(), request.getSignatures(), null);
+    }
+
+    /**
+     * 场景证书签章编排（本身无事务）：签发临时证 → 签章 → finally 吊销。
+     * 各步骤独立事务，签章失败 finally 仍提交吊销，不残留有效证书。
+     * 注意：不用 CertServiceImpl.issue()，其“同 creditCode 旧证自动作废”会误伤长期证。
+     */
+    @Override
+    public SignResponse signScenario(ScenarioSignRequest request) {
+        Certificate temp = self.issueTempCert(request);
+        boolean signed = false;
+        boolean revokeFailed = false;
+        try {
+            SignResponse resp = self.signWithCert(temp, request.getPdfUrl(), request.getSignatures(), temp.getSignerId());
+            signed = true;
+            return resp;
+        } finally {
+            try {
+                self.revokeTempCert(temp.getId());
+            } catch (Exception e) {
+                log.error("临时证书吊销失败 signerId={}", temp.getSignerId(), e);
+                revokeFailed = true;
+            }
+            if (signed && revokeFailed) {
+                throw new BizException("签章成功但临时证书吊销失败，需人工处理 signerId=" + temp.getSignerId());
+            }
+        }
+    }
+
+    /** 签发临时短期证书并落库（独立事务），p12 仅随实体在内存传递，不返回调用方 */
+    @Transactional
+    public Certificate issueTempCert(ScenarioSignRequest request) {
+        if (request.getCertType() == null || (request.getCertType() != 1 && request.getCertType() != 2)) {
+            throw new BizException("证书类型无效，1=企业，2=个人");
+        }
+        if (request.getCreditCode() == null || request.getCreditCode().isBlank()) {
+            throw new BizException("统一信用代码/身份证号不能为空");
+        }
+        if (request.getName() == null || request.getName().isBlank()) {
+            throw new BizException("姓名不能为空");
+        }
+        int days = request.getValidDays() != null && request.getValidDays() > 0 ? request.getValidDays() : 1;
+
+        try {
+            IssueResult result = issuer.issue(request.getCertType(), request.getCreditCode(),
+                    request.getName(), request.getDepartment(), request.getEmail(), days);
+
+            Certificate cert = new Certificate();
+            cert.setSignerId(result.getSignerId());
+            cert.setCertType(request.getCertType());
+            cert.setCreditCode(request.getCreditCode());
+            cert.setName(request.getName());
+            cert.setDepartment(request.getDepartment());
+            cert.setEmail(request.getEmail());
+            cert.setSerialNumber(result.getSerialNumber());
+            cert.setCertSubject(result.getCertSubject());
+            cert.setStatus(CertStatus.ACTIVE);
+            cert.setValidFrom(result.getValidFrom());
+            cert.setValidTo(result.getValidTo());
+            cert.setP12Data(result.getP12Data());
+            return certRepo.save(cert);
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BizException("临时证书签发失败: " + e.getMessage());
+        }
+    }
+
+    /** 吊销临时证书（独立新事务，finally 中必提交）；已吊销/不存在则静默跳过 */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void revokeTempCert(Long certId) {
+        Certificate cert = certRepo.findById(certId).orElse(null);
+        if (cert == null || cert.getStatus() == CertStatus.REVOKED) {
+            return;
+        }
+        cert.setStatus(CertStatus.REVOKED);
+        certRepo.save(cert);
+    }
+
+    /**
+     * 签章核心（下载 PDF → 密码学签名 → 上传 → 审计 → 响应），供 sign / signScenario 复用。
+     *
+     * @param tempSignerId 场景签章时回填本次临时 signerId，老接口传 null
+     */
+    @Transactional
+    public SignResponse signWithCert(Certificate cert, String pdfUrl,
+                                     List<SignRequest.SignPosition> signatures, String tempSignerId) {
         // 2. 下载待签 PDF 并计算原始哈希（用于审计追溯原始文件）
-        byte[] pdfData = downloadPdf(request.getPdfUrl());
+        byte[] pdfData = downloadPdf(pdfUrl);
         String pdfHash = sha256(pdfData);
 
         // 3. 按页码归集签章位置，传递给 PdfSigner 逐页盖章；
         //    reason 取第一个非空签章原因，作为整份 PDF 数字签名的 Reason 字段
         Map<Integer, List<PdfSigner.SignPosition>> seals = new HashMap<>();
         String reason = null;
-        for (SignRequest.SignPosition sp : request.getSignatures()) {
+        for (SignRequest.SignPosition sp : signatures) {
             seals.computeIfAbsent(sp.getPageIndex(), k -> new ArrayList<>())
                     .add(new PdfSigner.SignPosition(sp.getSealUrl(), sp.getX(), sp.getY(), sp.getWidth(), sp.getHeight()));
             if (reason == null && sp.getReason() != null && !sp.getReason().isBlank()) {
@@ -79,20 +182,19 @@ public class SigningServiceImpl implements SigningService {
 
         try {
             // 4. 用签署人证书私钥执行视觉签章 + 数字签名，产出已签章 PDF
-            String p12Password = "cert-secret-key-32bytes!!";
-            byte[] signedPdf = pdfSigner.sign(pdfData, cert.getP12Data(), p12Password, reason, seals);
+            byte[] signedPdf = pdfSigner.sign(pdfData, cert.getP12Data(), keySecret, reason, seals);
 
             // 5. 上传已签章 PDF 到文件存储，返回可访问 URL
             String signedPdfHash = sha256(signedPdf);
-            String fileName = "signed_" + request.getSignerId() + "_" + System.currentTimeMillis() + ".pdf";
+            String fileName = "signed_" + cert.getSignerId() + "_" + System.currentTimeMillis() + ".pdf";
             String signedUrl = storageService.upload(signedPdf, fileName);
 
             // 6. 写审计日志：记录签署人、证书、PDF 哈希、签章时间，便于事后追溯
             AuditLog log = new AuditLog();
-            log.setSignerId(request.getSignerId());
+            log.setSignerId(cert.getSignerId());
             log.setCreditCode(cert.getCreditCode());
             log.setCertSerialNumber(cert.getSerialNumber());
-            log.setPdfUrl(request.getPdfUrl());
+            log.setPdfUrl(pdfUrl);
             log.setPdfHash(pdfHash);
             log.setSignedPdfHash(signedPdfHash);
             log.setSignTime(LocalDateTime.now());
@@ -103,6 +205,7 @@ public class SigningServiceImpl implements SigningService {
             resp.setSignedPdfUrl(signedUrl);
             resp.setCertSubject(cert.getCertSubject());
             resp.setSignTime(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            resp.setTempSignerId(tempSignerId);
             return resp;
 
         } catch (BizException e) {

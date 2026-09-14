@@ -16,4 +16,9 @@ public class SignResponse {
     private String certSubject;
     /** 签章时间（ISO_LOCAL_DATE_TIME 格式） */
     private String signTime;
+    /**
+     * 场景签章时本次临时证书的 signerId（便于追溯审计/证书表）；
+     * 老 /sign 接口置 null，p12 私钥永不返回。
+     */
+    private String tempSignerId;
 }
